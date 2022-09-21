@@ -1,4 +1,4 @@
-Activate the conda enviranment with torch installed.
+First: Activate the conda enviranment with torch installed.
 
 ## Coordinator
 
