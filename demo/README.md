@@ -1,5 +1,7 @@
 First: Activate the conda enviranment with torch installed.
 
+High levle description is given [here](https://scientific-goldfish-3af.notion.site/Demo1-Code-Description-29bfa36fe62a410d8608cb9d30996c29)
+
 ## Coordinator
 
 Coordinator port can be changed in config.py
