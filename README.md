@@ -1,2 +1,2 @@
 # models-on-the-move
-ode for research project conducted with DPRG.
+Code for research project conducted with DPRG.
