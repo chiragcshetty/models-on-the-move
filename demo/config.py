@@ -5,5 +5,5 @@
 BASIC_BLOCKS     = []
 
 #-------------------------------------------------------
-COORDINATOR_IP   = 'localhost'
-COORDINATOR_PORT = 6000
+COORDINATOR_IP   = '130.126.136.8'
+COORDINATOR_PORT = 6009

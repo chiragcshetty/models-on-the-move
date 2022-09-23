@@ -16,10 +16,11 @@ class Job:
     """
     Class representing a training job
     """
-    def __init__(self, job_name, model_info, job_conn):
+    def __init__(self, job_name, model_info, job_conn, job_addr):
         self.name        = job_name
         self.conn        = job_conn
         self.model_info  = model_info
+        self.addr = job_addr
         self.dev_mem_map = {} # device:(mem occupied by the job)
 
     def send_setup(self):
@@ -41,13 +42,27 @@ class Job:
         self.conn.send(msg_out)
         _LOGGER.info("Reconfiguration for job {} sent".format(self.name))
 
+class Machine:
+    """
+    Class representing machines in the cluster. conn connects
+    to assitant running on that machine
+    """
+    def __init__(self, name, ip_addr, device_map):
+        self.name = name
+        self.ip_addr = ip_addr
+        self.device_map = device_map
+        self.no_devices = len(device_map)
+
 #----------------------------------------------------------------------
 class Configurator:
     """
     (Re)configuration and Placement logis sits here
     """
-    def __init__(self, device_map):
-        self.device_map = device_map # map device: mem_available and jobs running
+    def __init__(self, cluster_info):
+        # cluster_info[ip_addr] = {'name':machine_name,'addr':ip_addr ,'device_info' = device_map}
+        # device_map[dev_id] = {'available_mem': mem_in_bytes, 'jobs_running':[]}
+        # TODO: Add info of memory occupied per job as well
+        self.cluster_info = cluster_info 
         self.job_map = {}            # map job_name:job_object
 
         # Thread listening to any reconfig inputs comming from the terminal
@@ -57,15 +72,34 @@ class Configurator:
         reconfig_listener.start()
         #TODO add locks to avoid conflict between add_new_job and reconfig_listener
 
-    # When a new job pings the coordinator, creatte a Job object
-    # and register it with the Configurator
-    def add_new_job(self, job_name, model_info, job_conn):
-        job = Job(job_name, model_info, job_conn)
-        self.job_map[job_name] = job
-        dev_config = self.get_config(job)
-        job = self.get_placement(job, dev_config)
-        job.send_setup()
+    def add_new_machine(self, machine_name, ip_addr, device_info):
+        if ip_addr not in self.cluster_info:
+            device_map = {}
+            for dev in device_info:
+                device_map[int(dev)] = {'available_mem':int(device_info[dev]),\
+                                'jobs_running':[]}
+            machine = Machine(machine_name, ip_addr, device_map)
+            
+            self.cluster_info[ip_addr] = machine
+            _LOGGER.info("Machine {} joined with ip_addr {}".format(machine_name, ip_addr))
+        else: 
+            _LOGGER.info("Machine already registered. Ignoring request")
+            #TODO: need to raise exception? 
 
+    # When a new job pings the coordinator, creatte a Job object
+    # and register it with the Configurator. But check that its machine
+    # has REGISTERED first
+    def add_new_job(self, job_name, model_info, job_conn, job_addr):
+        if job_addr in self.cluster_info:
+            job = Job(job_name, model_info, job_conn, job_addr)
+            self.job_map[job_name] = job
+            dev_config = self.get_config(job)
+            job = self.get_placement(job, dev_config)
+            job.send_setup()
+        else:
+            job_conn.send("DENIED".encode())
+            _LOGGER.info("Job {} tried to join from machine {}. But the machine is not registered. Please run assistant.py on that machine first".\
+                    format(job_name, job_addr))
 
     def reconfig_listener(self):
         #listen to terminal
@@ -94,10 +128,11 @@ class Configurator:
 
         # placeholder dummy logic:
         # Randomly picks a device and the next device to split the model across
-        dev1 = random.randint(0,3)
-        dev2 = (dev1+1)%4
-        self.device_map[dev1]['jobs_running'].append(job)
-        self.device_map[dev2]['jobs_running'].append(job)
+        L = self.cluster_info[job.addr].no_devices
+        dev1 = random.randint(0,L-1)
+        dev2 = (dev1+1)%L
+        self.cluster_info[job.addr].device_map[dev1]['jobs_running'].append(job)
+        self.cluster_info[job.addr].device_map[dev2]['jobs_running'].append(job)
         return [dev1, dev2]
     
     def get_placement(self, job, dev_config):
@@ -122,12 +157,14 @@ class Configurator:
             # TODO: Update this only after the job ack's the morphing. May
             # need locks to prevent other jobs from being allotted while waiting
             # for ack
-            self.device_map[dev]['available_mem'] -= job.model_info[k]['memory']
+            self.cluster_info[job.addr].device_map[dev]['available_mem'] -= job.model_info[k]['memory']
 
         _LOGGER.info("Placement generated for job {}".format(job.name))
         _LOGGER.info("Updated Device Map:")
-        for d in self.device_map:
-            _LOGGER.info(" Device {} : {} bytes".format(d, self.device_map[d]['available_mem']))
+
+        machine =self.cluster_info[job.addr]
+        for d in machine.device_map:
+            _LOGGER.info("Machine {}, Device {} : {} bytes".format(machine.name, d, machine.device_map[d]['available_mem']))
         return job
             
     # TODO remove job and update device_map and mem when job is done or reconfigured out

@@ -5,6 +5,7 @@ import time
 import torch
 import socket
 import json
+import os
 
 
 import config
@@ -58,6 +59,10 @@ class Worker:
                 setup = json.loads(cmd[1])
                 self.model_info.copy_device_allotment(setup)
                 self.reconfig_ready.set()
+
+            elif cmd[0] == "DENIED":
+                _LOGGER.info("Coordinator denied. Machine needs to be registered first. Run assistant.py")
+                os._exit(1)
                 
         self.listener.close()
 
