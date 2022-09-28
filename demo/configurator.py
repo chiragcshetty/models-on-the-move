@@ -42,6 +42,13 @@ class Job:
         self.conn.send(msg_out)
         _LOGGER.info("Reconfiguration for job {} sent".format(self.name))
 
+    def move_reconfig(self):
+        # When reconfig involves moving model to a different device.
+        msg_out = ("MOVE-" + json.dumps(self.model_info))\
+                                            .encode()
+        self.conn.send(msg_out)
+        _LOGGER.info("Reconfiguration for job {} sent".format(self.name))
+
 class Machine:
     """
     Class representing machines in the cluster. conn connects
