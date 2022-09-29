@@ -69,10 +69,16 @@ PATH = "model.pt"
 LOSS = 0.4
 
 torch.save({
-            'epoch': EPOCH,
+            'model_name': 'basicModel',
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
+            'criterion': 'MSELoss',
+            'optimizer': 'SGD',
             'loss': LOSS,
+            'batch_size':32,
+            'Nrun': 2000,
+            'inp_size': (1,6400),
+            'worker_name': 'job_k'
             }, PATH)
 
 
@@ -93,8 +99,6 @@ labels = torch.randn((32,10*factor))
 checkpoint = torch.load(PATH)
 model.load_state_dict(checkpoint['model_state_dict'])
 optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-epoch = checkpoint['epoch']
-loss = checkpoint['loss']
 
 dummy_inp = torch.ones((1,64*factor))*0.0001
 print("value:", torch.sum(model(dummy_inp)))

@@ -6,4 +6,6 @@ BASIC_BLOCKS     = []
 
 #-------------------------------------------------------
 COORDINATOR_IP   = '130.126.136.8'
-COORDINATOR_PORT = 6010
+COORDINATOR_PORT = 6098
+
+ASSISTANT_PORT = 5919

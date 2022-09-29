@@ -53,6 +53,9 @@ if config.TRANSFER_TYPE == 'chkpt':
     model = mn.basicModel(factor)
     checkpoint = torch.load(savefilename)
     model.load_state_dict(checkpoint['model_state_dict'])
+    batch_size = checkpoint['batch_size']
+    inp_size = checkpoint['inp_size']
+    print("sleeping");time.sleep(10)
 
 
     dummy_inp = torch.ones((1,64*factor))*0.0001

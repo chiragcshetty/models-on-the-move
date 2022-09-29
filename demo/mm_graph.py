@@ -179,10 +179,6 @@ class ModelPy:
 
 
 
-
-
-
-
 '''
 # TODO: For tensorflow
 class ModelTF:

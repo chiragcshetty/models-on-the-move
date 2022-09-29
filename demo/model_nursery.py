@@ -23,3 +23,15 @@ class basicModel(nn.Module):
         x = self.fc3(x)
         x = self.fc4(x)
         return x
+
+def get_model(model_name, *args, **kwargs):
+    if model_name == "basicModel":
+        return basicModel(*args, **kwargs)
+
+def get_optimizer(optimizer_name, *args, **kwargs):
+    if optimizer_name == "SGD":
+        return optim.SGD(*args, **kwargs)
+
+def get_criterion(criterion_name, *args, **kwargs):
+    if criterion_name == "MSELoss":
+        return nn.MSELoss(*args, **kwargs)

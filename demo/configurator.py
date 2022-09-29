@@ -16,19 +16,20 @@ class Job:
     """
     Class representing a training job
     """
-    def __init__(self, job_name, model_info, job_conn, job_addr):
+    def __init__(self, job_name, model_info, job_conn, job_addr, job_machine):
         self.name        = job_name
-        self.conn        = job_conn
-        self.model_info  = model_info
-        self.addr = job_addr
-        self.dev_mem_map = {} # device:(mem occupied by the job)
+        self.conn        = job_conn   # connection to submittor of the job
+        self.model_info  = model_info # an object of mm_graph.ModelPy class
+        self.addr        = job_addr   # ipaddr of machine job is running on
+        self.machine     = job_machine # name of machine job is running on
+        self.dev_mem_map = {}         # device:(mem occupied by the job)
 
     def send_setup(self):
         # Send the initial setup configuration to the job's process,
         # stating which node goes to which device.
         # NOTE: This must be done after Configurator has
         # modified the job's model_info with placment information
-        msg_out = ("SETUP-" + json.dumps(self.model_info))\
+        msg_out = ("SETUP-"+ self.addr + ":"+ json.dumps(self.model_info))\
                                             .encode()
         self.conn.send(msg_out)
         _LOGGER.info("Intial setup for job {} sent".format(self.name))
@@ -42,12 +43,13 @@ class Job:
         self.conn.send(msg_out)
         _LOGGER.info("Reconfiguration for job {} sent".format(self.name))
 
-    def move_reconfig(self):
+    def move_reconfig(self, destination_machine):
         # When reconfig involves moving model to a different device.
-        msg_out = ("MOVE-" + json.dumps(self.model_info))\
-                                            .encode()
+        msg_out = ("MOVE-" + destination_machine).encode()
         self.conn.send(msg_out)
-        _LOGGER.info("Reconfiguration for job {} sent".format(self.name))
+        _LOGGER.info("Job {} is requested to move to machine {}. It will take sometime."\
+                                    .format(self.name, destination_machine))
+        
 
 class Machine:
     """
@@ -55,22 +57,26 @@ class Machine:
     to assitant running on that machine
     """
     def __init__(self, name, ip_addr, device_map):
-        self.name = name
-        self.ip_addr = ip_addr
-        self.device_map = device_map
+        self.name       = name
+        self.ip_addr    = ip_addr
+        self.device_map = device_map # map gpu_id to {'available_mem':xx, 'jobs_running':[]}
         self.no_devices = len(device_map)
 
 #----------------------------------------------------------------------
 class Configurator:
     """
-    (Re)configuration and Placement logis sits here
+    (Re)configuration and Placement logics sits here
     """
     def __init__(self, cluster_info):
         # cluster_info[ip_addr] = {'name':machine_name,'addr':ip_addr ,'device_info' = device_map}
         # device_map[dev_id] = {'available_mem': mem_in_bytes, 'jobs_running':[]}
         # TODO: Add info of memory occupied per job as well
-        self.cluster_info = cluster_info 
-        self.job_map = {}            # map job_name:job_object
+        self.cluster_info = cluster_info # map machine_ip_addr : Machine_object
+        self.cluster_machine_by_name = {} # map machine_name : Machine_object
+        for _, machine in self.cluster_info.items():
+            self.cluster_machine_by_name[machine.name] = machine
+
+        self.job_map = {}  # map job_name : Job_object
 
         # Thread listening to any reconfig inputs comming from the terminal
         # at the coordinator
@@ -88,6 +94,7 @@ class Configurator:
             machine = Machine(machine_name, ip_addr, device_map)
             
             self.cluster_info[ip_addr] = machine
+            self.cluster_machine_by_name[machine_name] = machine
             _LOGGER.info("Machine {} joined with ip_addr {}".format(machine_name, ip_addr))
         else: 
             _LOGGER.info("Machine already registered. Ignoring request")
@@ -98,7 +105,8 @@ class Configurator:
     # has REGISTERED first
     def add_new_job(self, job_name, model_info, job_conn, job_addr):
         if job_addr in self.cluster_info:
-            job = Job(job_name, model_info, job_conn, job_addr)
+            job_machine = self.cluster_info[job_addr].name
+            job = Job(job_name, model_info, job_conn, job_addr, job_machine)
             self.job_map[job_name] = job
             dev_config = self.get_config(job)
             job = self.get_placement(job, dev_config)
@@ -110,21 +118,47 @@ class Configurator:
 
     def reconfig_listener(self):
         #listen to terminal
-        #terminal input format: job_name-dev1,dev2
+        #terminal input format:
+        # to reconfig within same machine-> reconfig:job_name-dev1,dev2
+        # to move to a new machine->        move:job_name-destination_machine_name
         while True:
-            request = input()
-            req = request.split('-') # TODO: check for inputs not following the fformat
-            job_name = req[0]
-            if job_name in self.job_map:
-                _LOGGER.info("New reconfig request recieved for job {} ".\
-                                    format(job_name))
-                devices = [int(i) for i in req[1].split(',')]
-                job = self.get_placement(self.job_map[job_name], devices)
-                # TODO: add a check if placement is not possible on given
-                # devices
-                job.send_reconfig()
+            user_inp = input()
+            try:
+                request_type, request = user_inp.split(':',1)
+            except:
+                _LOGGER.info("Invalid request format. Request format--> move:job_name-machine_name"\
+                        +" or reconfig:job_name-machine_name")
             else:
-                _LOGGER.info("Invalid reconfig request. Request format: job_name-dev1,dev2")
+                req = request.split('-') # TODO: check for inputs not following the fformat
+                job_name = req[0]
+                if request_type == "reconfig":
+                    if job_name in self.job_map:
+                        _LOGGER.info("New reconfig request recieved for job {} ".\
+                                            format(job_name))
+                        devices = [int(i) for i in req[1].split(',')]
+                        job = self.get_placement(self.job_map[job_name], devices)
+                        # TODO: add a check if placement is not possible on given
+                        # devices
+                        job.send_reconfig()
+                    else:
+                        _LOGGER.info("Job {} not found. Request format--> reconfig:job_name-dev1,dev2".format(job_name))
+
+                elif request_type == "move":
+                    if job_name in self.job_map:
+                        dest_machine = req[1]
+                        if dest_machine in self.cluster_machine_by_name:
+                            _LOGGER.info("New request recieved to move job {} to machine {} ".\
+                                            format(job_name, dest_machine))
+                            self.job_map[job_name].move_reconfig(self.cluster_machine_by_name[dest_machine].ip_addr)
+                            del self.job_map[job_name] # job will kill itself and restart at 
+                                                # the new machine and ping coordinator
+                                                # TODO: get an ack from job before forgetting it
+
+                        else:
+                            _LOGGER.info("Invalid machine name. Request format--> move:job_name-machine_name")
+                    else:
+                        _LOGGER.info("Invalid job name or move request. Request format--> move:job_name-machine_name")
+
 
     
     def get_config(self, job):
@@ -150,6 +184,7 @@ class Configurator:
 
         # placeholder dummy logic:
         # Allots first half of nodes to dev_1 and next half to dev_2
+        # TODO: check dev_config is correct/valid
         no_nodes = len(job.model_info)
         for k, node in job.model_info.items():
             i=int(k)
